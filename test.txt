@@ -1,0 +1,6 @@
+ENV['RAILS_ENV']
+IpsumLorem = ENV["ARGS"] * ipsum
+
+Ipsum ipsum IpsumLorem
+
+ENV["ARG1"]ENV["ARG2"]ENV["ARG3"]
