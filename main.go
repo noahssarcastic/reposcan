@@ -13,12 +13,16 @@ func main() {
 	args := os.Args[1:]
 	rootDir := args[0]
 
+	// TODO take re as flag and validate
 	re, err := regexp.Compile(`ENV\[['"](\w+)['"]\]`)
 	check(err)
 
+	// TODO take glob as flag and validate
+	glob := "*.rb"
+
 	parseDir(rootDir, func(line string) []string {
 		return findAll(line, re)
-	})
+	}, glob)
 }
 
 func findAll(s string, re *regexp.Regexp) (matches []string) {
@@ -34,7 +38,7 @@ func findAll(s string, re *regexp.Regexp) (matches []string) {
 
 type Matcher = func(string) []string
 
-func parseDir(name string, matcher Matcher) {
+func parseDir(name string, matcher Matcher, glob string) {
 	files, err := os.ReadDir(name)
 	check(err)
 	path, err := filepath.Abs(name)
@@ -42,10 +46,10 @@ func parseDir(name string, matcher Matcher) {
 	for _, child := range files {
 		childName := filepath.Join(path, child.Name())
 		if child.IsDir() {
-			parseDir(childName, matcher)
+			parseDir(childName, matcher, glob)
 			continue
 		}
-		handleFile(childName, matcher)
+		handleFile(childName, matcher, glob)
 	}
 }
 
@@ -59,7 +63,13 @@ func parseDir(name string, matcher Matcher) {
 // 	lineNumber int
 // }
 
-func handleFile(name string, matcher Matcher) {
+func handleFile(name string, matcher Matcher, glob string) {
+	matchesGlob, err := filepath.Match(glob, filepath.Base(name))
+	check(err) // TODO validate glob earlier
+	if !matchesGlob {
+		return
+	}
+
 	file, err := os.Open(name)
 	check(err)
 	defer file.Close()
@@ -73,7 +83,7 @@ func handleFile(name string, matcher Matcher) {
 			fmt.Printf("%s:%d\n%v\n", name, i, printMatches(matches))
 		}
 	}
-	check(scanner.Err())
+	checkPlus(scanner.Err(), fmt.Sprintf("%v", name))
 }
 
 func printMatches(matches []string) string {
