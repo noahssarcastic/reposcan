@@ -2,55 +2,84 @@ package main
 
 import (
 	"bufio"
+	"flag"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/pkg/errors"
 )
 
+type Matcher = struct {
+	glob    string
+	pattern *regexp.Regexp
+}
+
+func NewMatcher(glob string, pattern *regexp.Regexp) *Matcher {
+	return &Matcher{glob, pattern}
+}
+
 func main() {
-	args := os.Args[1:]
-	rootDir := args[0]
+	rootDir := flag.String("file", ".", "")
+	glob := flag.String("glob", "*", "")
+	pattern := flag.String("regexp", "", "")
+	flag.Parse()
 
-	// TODO take re as flag and validate
-	re, err := regexp.Compile(`ENV\[['"](\w+)['"]\]`)
-	check(err)
+	re, err := regexp.Compile(*pattern)
+	if err != nil {
+		log.Fatalln(err)
+	}
+	matcher := NewMatcher(*glob, re)
 
-	// TODO take glob as flag and validate
-	glob := "*.rb"
-
-	parseDir(rootDir, func(line string) []string {
-		return findAll(line, re)
-	}, glob)
+	err = parseDir(*rootDir, matcher)
+	if err != nil {
+		log.Fatalln(err)
+	}
 }
 
-func findAll(s string, re *regexp.Regexp) (matches []string) {
-	results := re.FindAllStringSubmatch(s, -1)
-	if results == nil {
-		return
-	}
-	for _, capture := range results {
-		matches = append(matches, capture[1])
-	}
-	return matches
+func parseError(fileName string, cause error) error {
+	return errors.Wrap(
+		cause,
+		fmt.Sprintf("error parsing %s", fileName),
+	)
 }
 
-type Matcher = func(string) []string
-
-func parseDir(name string, matcher Matcher, glob string) {
+func parseDir(name string, matcher *Matcher) error {
 	files, err := os.ReadDir(name)
-	check(err)
-	path, err := filepath.Abs(name)
-	check(err)
-	for _, child := range files {
-		childName := filepath.Join(path, child.Name())
-		if child.IsDir() {
-			parseDir(childName, matcher, glob)
-			continue
-		}
-		handleFile(childName, matcher, glob)
+	if err != nil {
+		return err
 	}
+	path, err := filepath.Abs(name)
+	if err != nil {
+		return err
+	}
+	for _, child := range files {
+		name := filepath.Join(path, child.Name())
+		isDir := child.IsDir()
+		err := handleChild(name, isDir, matcher)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func handleChild(name string, isDir bool, matcher *Matcher) error {
+	if isDir {
+		err := parseDir(name, matcher)
+		if err != nil {
+			return err
+		}
+		return nil
+	}
+	err := handleFile(name, matcher)
+	if err != nil {
+		log.Println(parseError(name, err))
+	}
+	return nil
 }
 
 // type Report = struct {
@@ -63,29 +92,40 @@ func parseDir(name string, matcher Matcher, glob string) {
 // 	lineNumber int
 // }
 
-func handleFile(name string, matcher Matcher, glob string) {
-	matchesGlob, err := filepath.Match(glob, filepath.Base(name))
-	check(err) // TODO validate glob earlier
-	if !matchesGlob {
-		return
+func handleFile(name string, matcher *Matcher) error {
+	baseName := filepath.Base(name)
+	if match, err := filepath.Match(matcher.glob, baseName); err != nil {
+		return err
+	} else if !match {
+		return nil
 	}
 
 	file, err := os.Open(name)
-	check(err)
+	if err != nil {
+		return err
+	}
 	defer file.Close()
 	scanner := bufio.NewScanner(file)
-
-	// For each line...
 	for i := 0; scanner.Scan(); i++ {
 		line := scanner.Text()
-		matches := matcher(line)
+		matches := findAll(line, matcher.pattern)
 		if len(matches) > 0 {
-			fmt.Printf("%s:%d\n%v\n", name, i, printMatches(matches))
+			fmt.Printf("%s:%d\n%v\n", name, i, strings.Join(matches, "\n"))
 		}
 	}
-	checkPlus(scanner.Err(), fmt.Sprintf("%v", name))
+	if scanner.Err() != nil {
+		return err
+	}
+	return nil
 }
 
-func printMatches(matches []string) string {
-	return strings.Join(matches, "\n")
+func findAll(s string, re *regexp.Regexp) (matches []string) {
+	results := re.FindAllStringSubmatch(s, -1)
+	if results == nil {
+		return
+	}
+	for _, capture := range results {
+		matches = append(matches, capture[1])
+	}
+	return matches
 }
