@@ -121,11 +121,8 @@ func handleFile(name string, matcher *Matcher) error {
 
 func findAll(s string, re *regexp.Regexp) (matches []string) {
 	results := re.FindAllStringSubmatch(s, -1)
-	if results == nil {
-		return
-	}
 	for _, capture := range results {
-		matches = append(matches, capture[1])
+		matches = append(matches, capture[0])
 	}
 	return matches
 }
